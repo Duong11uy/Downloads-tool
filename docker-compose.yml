@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  novel-downloader:
+    build: .
+    container_name: novel-downloader
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./config:/app/config
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - CONCURRENCY=5

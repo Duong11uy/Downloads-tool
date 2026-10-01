@@ -1,0 +1,140 @@
+{
+  "sites": {
+    "truyenyy": {
+      "name": "TruyenYY",
+      "domains": [
+        "truyenyy.co",
+        "www.truyenyy.co",
+        "truyenyy.vip",
+        "www.truyenyy.vip",
+        "truyenyy.com",
+        "www.truyenyy.com"
+      ],
+      "encoding": "utf-8",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "vi,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://www.truyenyy.co/"
+      },
+      "selectors": {
+        "title": [
+          "h1.font-title",
+          "meta[property='og:title']",
+          "title"
+        ],
+        "author": [
+          "div.pt-2 p.font-title",
+          "span.text-opacity-50 p",
+          "a.hover\\:text-\\[\\#269bfa\\]",
+          "p.hover\\:text-\\[\\#269bfa\\]"
+        ],
+        "cover": [
+          "meta[property='og:image']",
+          "div.rounded-md img",
+          "div.w-\\[160px\\] img"
+        ],
+        "description": [
+          "div.prose",
+          "p.prose",
+          "meta[property='og:description']",
+          "meta[name='description']"
+        ],
+        "status_regex": "Trạng thái[\\s\\S]*?(Còn tiếp|Hoàn thành|Đang ra)",
+        "total_chapters_regex": "(\\d{1,6})(?:<[^>]+>|\\s|<!--.*?-->)*?Chương",
+        "chapter_list_url": "{novel_url}/danh-sach-chuong",
+        "chapter_list_page_url": "{novel_url}/danh-sach-chuong?p={page}",
+        "chapter_items": "ul.divide-y li a",
+        "chapter_title": "p.line-clamp-2",
+        "chapter_index": "div.w-\\[32px\\] p",
+        "chapter_vip_badge": "img[src*='vip']",
+        "chapter_content": "article",
+        "chapter_paragraphs": "article p",
+        "remove_selectors": [
+          "script",
+          "style",
+          "svg",
+          ".ads",
+          ".advertisement",
+          "button",
+          "nav",
+          "header",
+          "footer"
+        ]
+      },
+      "pagination": {
+        "type": "query_param",
+        "param": "p",
+        "page_size": 100,
+        "start_page": 1,
+        "max_page_selector": "select option:last-child"
+      },
+      "rate_limit": {
+        "min_delay": 0.2,
+        "max_delay": 0.5,
+        "max_concurrent": 5
+      }
+    },
+    "xtruyen": {
+      "name": "XTruyen",
+      "domains": [
+        "xtruyen.vn",
+        "www.xtruyen.vn"
+      ],
+      "encoding": "utf-8",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "vi,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://xtruyen.vn/"
+      },
+      "selectors": {
+        "title": [
+          "meta[property='og:title']",
+          "div.post-title h1",
+          "h1.rate-title",
+          "title"
+        ],
+        "author": [
+          "div.author-content a",
+          "div.post-content_item a[href*='/tacgia/']"
+        ],
+        "cover": [
+          "meta[property='og:image']",
+          "div.summary_image img"
+        ],
+        "description": [
+          "div.description-summary div.summary__content",
+          "div.description-summary",
+          "meta[property='og:description']"
+        ],
+        "status_regex": "(?:Trạng thái|Tình trạng)[\\s\\S]*?(Đang ra|Hoàn thành|Còn tiếp)",
+        "total_chapters_regex": "chuong-(\\d+)/?[\"'][^>]*>(?:\\s*|<!--.*?-->)*Chương cuối",
+        "chapter_content": "div.reading-content, div.text-left",
+        "chapter_paragraphs": "div.reading-content p, div.text-left p",
+        "remove_selectors": [
+          "script",
+          "style",
+          "svg",
+          ".ads",
+          ".advertisement",
+          "button",
+          "nav",
+          "header",
+          "footer",
+          ".native-stories"
+        ]
+      },
+      "pagination": {
+        "type": "api",
+        "page_size": 100,
+        "start_page": 1
+      },
+      "rate_limit": {
+        "min_delay": 0.3,
+        "max_delay": 0.6,
+        "max_concurrent": 3
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+downloads/*
+!downloads/.gitkeep
+.idea/
+.vscode/
+deploy.zip
+*.log
