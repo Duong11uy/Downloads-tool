@@ -1,0 +1,61 @@
+Collecting paramiko
+  Downloading paramiko-5.0.0-py3-none-any.whl.metadata (3.7 kB)
+Collecting bcrypt>=3.2 (from paramiko)
+  Downloading bcrypt-5.0.0.tar.gz (25 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting cryptography>=3.3 (from paramiko)
+  Downloading cryptography-50.0.2.tar.gz (880 kB)
+     ---------------------------------------- 880.6/880.6 kB 2.9 MB/s  0:00:00
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'error'
+  error: subprocess-exited-with-error
+  
+  installing build dependencies for cryptography did not run successfully.
+  exit code: 1
+  
+  [33 lines of output]
+  Ignoring cffi: markers 'python_version >= "3.15" and platform_python_implementation != "PyPy"' don't match your environment
+  Collecting maturin<2,>=1.14.1
+    Using cached maturin-1.15.0.tar.gz (385 kB)
+    Installing build dependencies: started
+    Installing build dependencies: finished with status 'done'
+    Getting requirements to build wheel: started
+    Getting requirements to build wheel: finished with status 'done'
+    Installing backend dependencies: started
+    Installing backend dependencies: finished with status 'done'
+    Preparing metadata (pyproject.toml): started
+    Preparing metadata (pyproject.toml): finished with status 'error'
+    error: subprocess-exited-with-error
+  
+    Preparing metadata (pyproject.toml) did not run successfully.
+    exit code: 1
+  
+    [5 lines of output]
+    C:\Users\TOPV.LAPTOP.144\AppData\Local\Temp\pip-build-env-97_ikjsw\overlay\lib\python3.14\site-packages\setuptools\_vendor\wheel\bdist_wheel.py:4: FutureWarning: The 'wheel' package is no longer the canonical location of the 'bdist_wheel' command, and will be removed in a future release. Please update to setuptools v70.1 or later which contains an integrated version of this command.
+      warn(
+    Python reports SOABI: cp314-mingw_x86_64_ucrt_gnu
+    Unsupported platform: mingw_x86_64_ucrt_gnu
+    Rust not found, installing into a temporary directory
+    [end of output]
+  
+    note: This error originates from a subprocess, and is likely not a problem with pip.
+  error: metadata-generation-failed
+  
+  Encountered error while generating package metadata.
+  
+  maturin
+  
+  note: This is an issue with the package mentioned above, not pip.
+  hint: See above for details.
+  [end of output]
+  
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+
+[notice] A new release of pip is available: 25.3 -> 26.2.1
+[notice] To update, run: d:\HuySpace\Downloads tool\venv\bin\python.exe -m pip install --upgrade pip
+ERROR: Failed to build 'cryptography' when installing build dependencies for cryptography

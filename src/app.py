@@ -462,24 +462,7 @@ class BuiltinHandler(SimpleHTTPRequestHandler):
         except Exception:
             payload = {}
 
-        if path == "/api/git_run":
-            import subprocess
-            cmd = payload.get("cmd", [])
-            try:
-                r = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
-                data = json.dumps({
-                    "code": r.returncode,
-                    "stdout": r.stdout,
-                    "stderr": r.stderr
-                }).encode("utf-8")
-            except Exception as e:
-                data = json.dumps({"error": str(e)}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-            return
+
 
         if path == "/api/analyze":
             url = payload.get("url", "").strip()

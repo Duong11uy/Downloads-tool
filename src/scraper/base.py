@@ -3,7 +3,7 @@ import logging
 import random
 import urllib.request
 import urllib.error
-from typing import Optional, Dict
+from typing import Optional, Dict, Any, List
 from src.core.config import DEFAULT_USER_AGENT, REQUEST_TIMEOUT, MAX_RETRIES
 
 logger = logging.getLogger("scraper.base")

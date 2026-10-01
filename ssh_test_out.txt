@@ -1,0 +1,2 @@
+Warning: Permanently added '100.93.95.78' (ED25519) to the list of known hosts.
+Linux dev-ubuntu24 7.0.14-15-pve #1 SMP PREEMPT_DYNAMIC PMX 7.0.14-15 (2026-08-26T14:21Z) x86_64 x86_64 x86_64 GNU/Linux
