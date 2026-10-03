@@ -113,12 +113,21 @@ class TaskManager:
             task.current_chapter = "Đang kết nối và phân tích truyện..."
             task.emit_event()
 
-            async with BaseScraperSession(cookie=task.cookie) as session:
-                clean_url = normalize_novel_url(task.url)
-                site_cfg = self.parser_manager.find_site_config(clean_url)
+            clean_url = normalize_novel_url(task.url)
+            site_cfg = self.parser_manager.find_site_config(clean_url)
+            cookie = (task.cookie or "").strip()
+            user_agent = (task.user_agent or "").strip()
+            if not cookie and site_cfg and "headers" in site_cfg:
+                cookie = site_cfg["headers"].get("Cookie", "")
+            if not user_agent and site_cfg and "headers" in site_cfg:
+                user_agent = site_cfg["headers"].get("User-Agent", "")
 
+            async with BaseScraperSession(cookie=cookie, user_agent=user_agent) as session:
                 # 1. Fast metadata analysis (only 1 page to get title, author, cover, and total chapters)
-                novel_info = await self.parser_manager.analyze_novel(session, clean_url, max_pages_to_fetch=1)
+                novel_info = await self.parser_manager.analyze_novel(
+                    session, clean_url, max_pages_to_fetch=1,
+                    cookie=cookie, user_agent=user_agent
+                )
                 task.novel_info = novel_info
 
                 total_chapters = novel_info.get("total_chapters", 0)
@@ -145,7 +154,9 @@ class TaskManager:
                         start_page=start_p,
                         end_page=end_p,
                         target_start_chap=task.start_chapter,
-                        target_end_chap=task.end_chapter
+                        target_end_chap=task.end_chapter,
+                        cookie=cookie,
+                        user_agent=user_agent
                     )
                 else:
                     target_page_chapters = novel_info.get("chapters", [])
@@ -225,6 +236,10 @@ class TaskManager:
                             # Save chapter directly to story folder (does not overwrite if present)
                             TxtBuilder.save_chapter_to_story_dir(story_dir, parsed_ch, overwrite=False)
                         except Exception as ce:
+                            err_s = str(ce).lower()
+                            if "403" in err_s or "rate" in err_s or "cloudflare" in err_s:
+                                logger.warning(f"Phát hiện Cloudflare rate limit ở chương {idx}. Nghỉ 4s để hạ nhiệt...")
+                                await asyncio.sleep(4.0)
                             logger.warning(f"Error parsing chapter {idx} ({ch_url}): {ce}")
                             parsed_ch = {
                                 "index": idx,

@@ -35,16 +35,25 @@ class BaseScraperSession:
     automatic retries, and browser impersonation with multi-engine fallback
     (curl_cffi -> httpx -> requests -> urllib).
     """
-    def __init__(self, headers: Optional[Dict[str, str]] = None, cookie: Optional[str] = None, use_curl_cffi: bool = True):
+    def __init__(self, headers: Optional[Dict[str, str]] = None, cookie: Optional[str] = None, user_agent: Optional[str] = None, use_curl_cffi: bool = True):
         self.default_headers = {
-            "User-Agent": DEFAULT_USER_AGENT,
+            "User-Agent": user_agent.strip() if user_agent else DEFAULT_USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "vi,en-US;q=0.9,en;q=0.8",
+            "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
             "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1"
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1"
         }
         if headers:
             self.default_headers.update(headers)
+        if user_agent:
+            self.default_headers["User-Agent"] = user_agent.strip()
         if cookie:
             clean_c = cookie.strip()
             if clean_c:
@@ -199,7 +208,7 @@ class BaseScraperSession:
                     resp = await self._curl_session.get(url, headers=req_headers)
                     if resp.status_code == 200:
                         return resp.text
-                    if resp.status_code in [429, 503, 520]:
+                    if resp.status_code in [403, 429, 503, 520]:
                         is_rate_limited = True
                     last_error = f"status {resp.status_code}"
                 except Exception as ce:
@@ -211,7 +220,7 @@ class BaseScraperSession:
                     resp = await self._httpx_client.get(url, headers=req_headers)
                     if resp.status_code == 200:
                         return resp.text
-                    if resp.status_code in [429, 503, 520]:
+                    if resp.status_code in [403, 429, 503, 520]:
                         is_rate_limited = True
                     last_error = f"status {resp.status_code}"
                 except Exception as he:
@@ -223,7 +232,7 @@ class BaseScraperSession:
                     return await asyncio.to_thread(self._sync_requests_get, url, req_headers)
                 except Exception as re_err:
                     err_msg = str(re_err).lower()
-                    if "429" in err_msg or "too many requests" in err_msg or "503" in err_msg:
+                    if "403" in err_msg or "429" in err_msg or "too many requests" in err_msg or "503" in err_msg:
                         is_rate_limited = True
                     last_error = str(re_err)
 
@@ -235,12 +244,15 @@ class BaseScraperSession:
                 last_error = str(ue)
 
             if attempt >= retries:
-                raise Exception(f"Không thể kết nối đến {url} sau {retries} lần thử ({last_error or 'kiểm tra mạng hoặc tường lửa web'}).")
+                err_str = last_error or 'kiểm tra mạng hoặc tường lửa web'
+                if "403" in err_str or "forbidden" in err_str.lower():
+                    err_str = f"Lỗi 403 Forbidden - Cloudflare chặn IP ({err_str})"
+                raise Exception(f"Không thể kết nối đến {url} sau {retries} lần thử ({err_str}).")
 
             # Progressive backoff with jitter
-            backoff = min(7.0, (1.4 ** attempt) + random.uniform(0.3, 0.8))
+            backoff = min(8.0, (1.5 ** attempt) + random.uniform(0.5, 1.2))
             if is_rate_limited:
-                backoff += 2.0
+                backoff += 3.0
             await asyncio.sleep(backoff)
 
         raise Exception(f"Không thể tải HTML từ {url}")

@@ -6,3 +6,4 @@ lxml>=5.1.0
 requests>=2.31.0
 pydantic>=2.6.0
 python-multipart>=0.0.9
+curl_cffi>=0.7.0

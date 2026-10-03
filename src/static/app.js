@@ -248,7 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (msg.includes('403') || msg.includes('Forbidden') || msg.includes('Cloudflare')) {
                 const openModal = confirm(
                     'Trang web đang kích hoạt tường lửa Cloudflare (Lỗi 403 Forbidden).\n\n' +
-                    'Bạn có muốn mở bảng "Vượt Cloudflare" để dán mã Cookie từ trình duyệt vào không? (Chỉ mất 15 giây)'
+                    'Bạn có muốn mở bảng "Vượt Cloudflare" (có sẵn nút bấm 1-click tự copy Cookie, KHÔNG cần Inspect/F12) không?'
                 );
                 if (openModal) {
                     cookieModal?.classList.remove('hidden');

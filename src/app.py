@@ -68,6 +68,8 @@ if FASTAPI_AVAILABLE:
 
     class AnalyzeRequest(BaseModel):
         url: str
+        cookie: Optional[str] = None
+        user_agent: Optional[str] = None
 
     class DownloadRequest(BaseModel):
         url: str
@@ -75,31 +77,91 @@ if FASTAPI_AVAILABLE:
         end_chapter: int = 99999
         format: str = "epub"
         concurrency: Optional[int] = DEFAULT_CONCURRENCY
+        cookie: Optional[str] = None
+        user_agent: Optional[str] = None
+
+    class SaveCookieRequest(BaseModel):
+        site: str = "xtruyen.vn"
+        cookie: str = ""
+        user_agent: Optional[str] = ""
+
+    @app.post("/api/save_cookie")
+    async def save_cookie(req: SaveCookieRequest, request: Request):
+        try:
+            site = req.site.strip() if req.site else "xtruyen.vn"
+            cookie = req.cookie.strip() if req.cookie else ""
+            ua = req.user_agent.strip() if req.user_agent else request.headers.get("user-agent", "")
+            task_manager.parser_manager.set_site_cookie(site, cookie, ua)
+            return {"success": True, "message": "Cookie đã được lưu thành công."}
+        except Exception as e:
+            logger.exception(f"Save cookie failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Lỗi lưu cookie: {str(e)}")
+
+    @app.get("/api/get_cookie")
+    async def get_cookie(site: str = "xtruyen.vn"):
+        cfg = task_manager.parser_manager.find_site_config(site)
+        if not cfg:
+            for k, s in task_manager.parser_manager.sites.items():
+                if "xtruyen" in k:
+                    cfg = s
+                    break
+        cookie = ""
+        ua = ""
+        if cfg and "headers" in cfg:
+            cookie = cfg["headers"].get("Cookie", "")
+            ua = cfg["headers"].get("User-Agent", "")
+        return {"site": site, "cookie": cookie, "user_agent": ua, "has_cookie": bool(cookie)}
 
     @app.post("/api/analyze")
-    async def analyze_novel(req: AnalyzeRequest):
+    async def analyze_novel(req: AnalyzeRequest, request: Request):
         url = str(req.url).strip()
         if not url:
             raise HTTPException(status_code=400, detail="Vui lòng cung cấp URL truyện.")
         try:
-            async with BaseScraperSession() as session:
-                info = await task_manager.parser_manager.analyze_novel(session, url)
+            clean_url = normalize_novel_url(url)
+            site_cfg = task_manager.parser_manager.find_site_config(clean_url)
+            cookie = (req.cookie or "").strip()
+            user_agent = (req.user_agent or "").strip() or request.headers.get("user-agent", "")
+            
+            # If cookie was not provided in request, check saved config
+            if not cookie and site_cfg and "headers" in site_cfg:
+                cookie = site_cfg["headers"].get("Cookie", "")
+            if not user_agent and site_cfg and "headers" in site_cfg:
+                user_agent = site_cfg["headers"].get("User-Agent", "")
+
+            async with BaseScraperSession(cookie=cookie, user_agent=user_agent) as session:
+                info = await task_manager.parser_manager.analyze_novel(
+                    session, clean_url, cookie=cookie, user_agent=user_agent
+                )
                 return {"success": True, "data": info}
         except Exception as e:
             logger.exception(f"Analyze failed: {e}")
             raise HTTPException(status_code=500, detail=f"Lỗi phân tích truyện: {str(e)}")
 
     @app.post("/api/download")
-    async def start_download(req: DownloadRequest):
+    async def start_download(req: DownloadRequest, request: Request):
         url = str(req.url).strip()
         if not url:
             raise HTTPException(status_code=400, detail="Vui lòng cung cấp URL truyện.")
+        clean_url = normalize_novel_url(url)
+        site_cfg = task_manager.parser_manager.find_site_config(clean_url)
+        cookie = (req.cookie or "").strip()
+        user_agent = (req.user_agent or "").strip() or request.headers.get("user-agent", "")
+        
+        # Fallback to saved cookie if not explicitly provided
+        if not cookie and site_cfg and "headers" in site_cfg:
+            cookie = site_cfg["headers"].get("Cookie", "")
+        if not user_agent and site_cfg and "headers" in site_cfg:
+            user_agent = site_cfg["headers"].get("User-Agent", "")
+
         task = task_manager.create_task(
             url=url,
             start_chapter=req.start_chapter,
             end_chapter=req.end_chapter,
             format_type=req.format,
-            concurrency=req.concurrency or DEFAULT_CONCURRENCY
+            concurrency=req.concurrency or DEFAULT_CONCURRENCY,
+            cookie=cookie,
+            user_agent=user_agent
         )
         return {"success": True, "task_id": task.task_id}
 

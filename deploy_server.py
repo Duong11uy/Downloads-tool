@@ -45,7 +45,7 @@ except Exception as e:
 commands = [
     ("Installing git and python tools if missing", "apt update && apt install -y git python3 python3-pip"),
     ("Cloning or pulling latest code from GitHub", "cd /root && (git clone https://github.com/Duong11uy/Downloads-tool.git || (cd Downloads-tool && git pull origin main))"),
-    ("Installing python requirements", "cd /root/Downloads-tool && pip install -r requirements.txt --break-system-packages"),
+    ("Installing python requirements", "cd /root/Downloads-tool && pip install -r requirements.txt curl_cffi --break-system-packages"),
     ("Stopping old running instances", "pkill -f 'src/app.py' || true"),
     ("Starting app in background with nohup", "cd /root/Downloads-tool && nohup python3 src/app.py > app.log 2>&1 &"),
     ("Verifying server is running on port 8000", "sleep 3 && curl -I http://localhost:8000")

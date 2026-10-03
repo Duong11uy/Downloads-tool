@@ -165,18 +165,37 @@ class SiteParserManager:
         novel_url: str,
         manga_id: str,
         from_idx: int = 1,
-        to_idx: int = 100
+        to_idx: int = 100,
+        cookie: str = "",
+        user_agent: str = ""
     ) -> List[Dict[str, Any]]:
         """
         Fetch chapters from xtruyen.vn API.
         """
         api_url = "https://xtruyen.vn/api/api-chapters.php"
+        ua = user_agent.strip() if user_agent else session.default_headers.get("User-Agent", DEFAULT_USER_AGENT)
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "User-Agent": ua,
+            "Accept": "*/*",
+            "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
             "X-Requested-With": "XMLHttpRequest",
             "X-Custom-Auth": "abC0000011111",
-            "Referer": novel_url
+            "Origin": "https://xtruyen.vn",
+            "Referer": novel_url,
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"'
         }
+        if cookie:
+            clean_c = cookie.strip()
+            if not clean_c.startswith("cf_clearance=") and "=" not in clean_c:
+                clean_c = f"cf_clearance={clean_c}"
+            headers["Cookie"] = clean_c
+        elif "Cookie" in session.default_headers:
+            headers["Cookie"] = session.default_headers["Cookie"]
         data = {
             "manga_id": str(manga_id),
             "from": str(from_idx),
@@ -228,12 +247,29 @@ class SiteParserManager:
         start_page: int = 1,
         end_page: Optional[int] = None,
         target_start_chap: int = 1,
-        target_end_chap: int = 99999
+        target_end_chap: int = 99999,
+        cookie: str = "",
+        user_agent: str = ""
     ) -> tuple[List[Dict[str, Any]], int]:
         clean_base = novel_url.rstrip("/") + "/"
         page_size = 100
 
-        home_html = await session.get_html(clean_base)
+        site_cfg = self.find_site_config(clean_base)
+        headers = dict(site_cfg.get("headers", {})) if site_cfg else {}
+        if not cookie and site_cfg and "headers" in site_cfg:
+            cookie = site_cfg["headers"].get("Cookie", "")
+        if not user_agent and site_cfg and "headers" in site_cfg:
+            user_agent = site_cfg["headers"].get("User-Agent", "")
+
+        if cookie:
+            clean_c = cookie.strip()
+            if not clean_c.startswith("cf_clearance=") and "=" not in clean_c:
+                clean_c = f"cf_clearance={clean_c}"
+            headers["Cookie"] = clean_c
+        if user_agent:
+            headers["User-Agent"] = user_agent.strip()
+
+        home_html = await session.get_html(clean_base, headers=headers)
         manga_id = None
         m_id = re.search(r'id="manga-chapters-holder"\s+data-id="(\d+)"', home_html)
         if m_id:
@@ -267,7 +303,9 @@ class SiteParserManager:
                 novel_url=clean_base,
                 manga_id=manga_id,
                 from_idx=1,
-                to_idx=100
+                to_idx=100,
+                cookie=cookie,
+                user_agent=user_agent
             )
             return p_chaps, expected_total
 
@@ -286,7 +324,9 @@ class SiteParserManager:
                 novel_url=clean_base,
                 manga_id=manga_id,
                 from_idx=f_idx,
-                to_idx=t_idx
+                to_idx=t_idx,
+                cookie=cookie,
+                user_agent=user_agent
             )
             if not p_chaps:
                 break
@@ -489,7 +529,9 @@ class SiteParserManager:
         start_page: int = 1,
         end_page: Optional[int] = None,
         target_start_chap: int = 1,
-        target_end_chap: int = 99999
+        target_end_chap: int = 99999,
+        cookie: str = "",
+        user_agent: str = ""
     ) -> tuple[List[Dict[str, Any]], int]:
         """
         Fetch chapter list according to pagination and selectors.
@@ -504,8 +546,24 @@ class SiteParserManager:
                 start_page=start_page,
                 end_page=end_page,
                 target_start_chap=target_start_chap,
-                target_end_chap=target_end_chap
+                target_end_chap=target_end_chap,
+                cookie=cookie,
+                user_agent=user_agent
             )
+
+        headers = dict(site_cfg.get("headers", {})) if site_cfg else {}
+        if not cookie and site_cfg and "headers" in site_cfg:
+            cookie = site_cfg["headers"].get("Cookie", "")
+        if not user_agent and site_cfg and "headers" in site_cfg:
+            user_agent = site_cfg["headers"].get("User-Agent", "")
+
+        if cookie:
+            clean_c = cookie.strip()
+            if not clean_c.startswith("cf_clearance=") and "=" not in clean_c:
+                clean_c = f"cf_clearance={clean_c}"
+            headers["Cookie"] = clean_c
+        if user_agent:
+            headers["User-Agent"] = user_agent.strip()
 
         selectors = site_cfg.get("selectors", {})
         pagination = site_cfg.get("pagination", {})
@@ -534,7 +592,7 @@ class SiteParserManager:
 
             page_url = list_url_pattern.format(novel_url=clean_novel_url, page=curr_page)
             try:
-                page_html = await session.get_html(page_url)
+                page_html = await session.get_html(page_url, headers=headers)
                 soup = make_soup(page_html, "lxml")
 
                 # On first page, inspect page for total chapters & dropdown options
@@ -656,6 +714,11 @@ class SiteParserManager:
         """
         site_cfg = self.find_site_config(chapter_url)
         headers = dict(site_cfg.get("headers", {})) if site_cfg else {}
+        if not cookie and site_cfg and "headers" in site_cfg:
+            cookie = site_cfg["headers"].get("Cookie", "")
+        if not user_agent and site_cfg and "headers" in site_cfg:
+            user_agent = site_cfg["headers"].get("User-Agent", "")
+
         if cookie:
             clean_c = cookie.strip()
             if not clean_c.startswith("cf_clearance=") and "=" not in clean_c:

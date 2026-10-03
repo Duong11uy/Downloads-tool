@@ -1,0 +1,7 @@
+Warning: Permanently added '100.93.95.78' (ED25519) to the list of known hosts.
+root         236  0.0  0.1  29492 20480 ?        Ss   Sep30   0:00 /usr/bin/python3 /usr/bin/networkd-dispatcher --run-startup-triggers
+root         246  0.0  0.1  29804 23764 ?        Ss   Sep30   0:12 /usr/bin/python3 /opt/vault-bot/vault_bot.py
+root        1457  0.0  0.1  33352 27212 ?        Ss   Sep30   0:15 /usr/bin/python3 -u /opt/finance-stack/telegram_bot.py
+root      438823  0.0  0.3 228320 64544 ?        Ssl  14:39   0:00 /root/vieneu-env/bin/python3 /root/vieneu-env/bin/uvicorn backend.main:app --host 0.0.0.0 --port 3080
+root      439525  0.0  0.0   4336  3208 ?        Ss   14:41   0:00 bash -c ps aux | grep -E 'python|uvicorn'
+root      439527  0.0  0.0   3540  1804 ?        S    14:41   0:00 grep -E python|uvicorn
