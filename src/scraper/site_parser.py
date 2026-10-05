@@ -35,6 +35,11 @@ def normalize_novel_url(url: str) -> str:
     m_xtruyen = re.match(r"^(https?://(?:www\.)?xtruyen\.vn/truyen/[^/?#]+)", url, re.IGNORECASE)
     if m_xtruyen:
         return m_xtruyen.group(1).rstrip("/") + "/"
+    m_truyenfull = re.match(r"^(https?://(?:www\.)?truyenfull\.[^/]+/([^/?#]+))", url, re.IGNORECASE)
+    if m_truyenfull:
+        slug = m_truyenfull.group(2).lower()
+        if slug not in ["the-loai", "tac-gia", "danh-sach", "tim-kiem", "hot", "moi", "full"]:
+            return m_truyenfull.group(1).rstrip("/")
     return url.rstrip("/")
 
 
@@ -66,6 +71,14 @@ class SiteParserManager:
         if ":" in domain:
             domain = domain.split(":")[0]
 
+        for key, site in self.sites.items():
+            domains = site.get("domains", [])
+            for d in domains:
+                if d in domain or domain.endswith("." + d):
+                    return site
+
+        # Reload from disk in case config file was modified after server startup
+        self.load_config()
         for key, site in self.sites.items():
             domains = site.get("domains", [])
             for d in domains:
@@ -445,19 +458,30 @@ class SiteParserManager:
         # 6. Total chapters from novel homepage
         total_chapters = 0
 
-        # Check Next.js __NEXT_DATA__ script
-        next_data_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.DOTALL)
-        if next_data_match:
-            try:
-                nd = json.loads(next_data_match.group(1))
-                props = nd.get("props", {}).get("pageProps", {})
-                novel_data = props.get("novel") or props.get("truyen") or props.get("story") or props
-                for key in ["total_chapters", "chap_count", "total_chap", "total_chapter", "num_chapters", "count_chap", "count_chapter"]:
-                    if key in novel_data and isinstance(novel_data[key], int) and novel_data[key] > 0:
-                        total_chapters = novel_data[key]
+        # Check site configured total_chapters_regex first
+        tc_regex = selectors.get("total_chapters_regex")
+        if tc_regex:
+            tc_m = re.search(tc_regex, html, re.IGNORECASE)
+            if tc_m:
+                for g in tc_m.groups():
+                    if g and g.isdigit() and int(g) > 0:
+                        total_chapters = int(g)
                         break
-            except Exception:
-                pass
+
+        # Check Next.js __NEXT_DATA__ script
+        if total_chapters == 0:
+            next_data_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.DOTALL)
+            if next_data_match:
+                try:
+                    nd = json.loads(next_data_match.group(1))
+                    props = nd.get("props", {}).get("pageProps", {})
+                    novel_data = props.get("novel") or props.get("truyen") or props.get("story") or props
+                    for key in ["total_chapters", "chap_count", "total_chap", "total_chapter", "num_chapters", "count_chap", "count_chapter"]:
+                        if key in novel_data and isinstance(novel_data[key], int) and novel_data[key] > 0:
+                            total_chapters = novel_data[key]
+                            break
+                except Exception:
+                    pass
 
         if total_chapters == 0:
             count_patterns = [
@@ -516,7 +540,7 @@ class SiteParserManager:
             "status": status,
             "total_chapters": total_chapters or len(chapters),
             "chapters": chapters,
-            "site_name": site_cfg.get("name", "TruyenYY"),
+            "site_name": site_cfg.get("name", "Truyện"),
             "novel_url": clean_url
         }
 
@@ -623,11 +647,22 @@ class SiteParserManager:
                         if len(options) > max_pages:
                             max_pages = len(options)
                             known_max = True
+                    else:
+                        pag_links = soup.select("ul.pagination a[href*='trang-'], ul.pagination a[href*='page='], .pagination a")
+                        if pag_links:
+                            highest_page = 0
+                            for pl in pag_links:
+                                pm = re.search(r'(?:trang-|page[=/])(\d+)', pl.get("href", ""))
+                                if pm:
+                                    highest_page = max(highest_page, int(pm.group(1)))
+                            if highest_page > 0:
+                                max_pages = max(max_pages, highest_page)
+                                known_max = True
 
                 item_selector = selectors.get("chapter_items", "ul.divide-y li a")
                 items = soup.select(item_selector)
                 if not items:
-                    for alt in ["ul.divide-y a", "ul li a[href*='chuong-']", "a[href*='/chuong-']", "div.divide-y a"]:
+                    for alt in ["ul.list-chapter li a", "ul.divide-y a", "ul li a[href*='chuong-']", "a[href*='/chuong-']", "div.divide-y a"]:
                         items = soup.select(alt)
                         if items:
                             break
@@ -747,12 +782,22 @@ class SiteParserManager:
 
         # Extract title
         title = ""
-        h1 = soup.select_one("h1")
-        if h1:
-            title = h1.get_text().strip()
-        elif soup.title:
-            title = soup.title.get_text().strip()
+        page_title_selectors = selectors.get("chapter_page_title")
+        if page_title_selectors:
+            if isinstance(page_title_selectors, str):
+                page_title_selectors = [page_title_selectors]
+            title_el = self._select_first(soup, page_title_selectors)
+            if title_el:
+                title = title_el.get_text().strip()
+
         if not title:
+            h1 = soup.select_one("h1")
+            if h1:
+                title = h1.get_text().strip()
+            elif soup.title:
+                title = soup.title.get_text().strip()
+
+        if not title or (site_cfg.get("name") and title.lower() == site_cfg.get("name", "").lower()) or (len(title) < 4 and chapter_title_hint):
             title = chapter_title_hint or f"Chương {chapter_index}"
 
         # Check if xtruyen encrypted content
@@ -789,8 +834,12 @@ class SiteParserManager:
 
         raw_paragraphs = []
         if content_el:
+            # Convert <br> tags into newlines so splitting preserves paragraphs cleanly
+            for br in content_el.find_all("br"):
+                br.replace_with("\n")
+
             p_tags = content_el.find_all("p")
-            if p_tags:
+            if len(p_tags) > 5:
                 raw_paragraphs = [p.get_text().strip() for p in p_tags if p.get_text().strip()]
             else:
                 lines = content_el.get_text("\n").split("\n")

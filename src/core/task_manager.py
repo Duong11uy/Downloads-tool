@@ -331,33 +331,36 @@ class TaskManager:
                 fmt = task.format_type
 
                 if fmt in ["txt", "both"]:
-                    txt_path = TxtBuilder.build(novel_info, ordered_chapters, DOWNLOAD_DIR)
+                    txt_path = TxtBuilder.build(novel_info, ordered_chapters, output_dir=story_dir)
                     generated_files.append({
                         "name": txt_path.name,
+                        "story": story_dir.name,
                         "format": "txt",
                         "size": txt_path.stat().st_size,
-                        "url": f"/api/files/{txt_path.name}"
+                        "url": f"/api/files/{quote(story_dir.name)}/{quote(txt_path.name)}"
                     })
 
                 if fmt in ["txt_split", "split"]:
                     story_dir = TxtBuilder.build_split(novel_info, ordered_chapters, DOWNLOAD_DIR)
-                    txt_files = [f for f in story_dir.glob("*.txt") if f.is_file()]
+                    txt_files = [f for f in story_dir.glob("*.txt") if f.is_file() and re.match(r"^(?:chương|chuong)\s*\d+", f.stem, re.IGNORECASE)]
                     total_bytes = sum(f.stat().st_size for f in txt_files)
                     generated_files.append({
                         "name": story_dir.name,
+                        "story": story_dir.name,
                         "format": "folder",
                         "size": total_bytes,
                         "count": len(txt_files),
-                        "url": f"/api/open_folder?name={quote(story_dir.name)}"
+                        "url": f"/api/export_zip/{quote(story_dir.name)}"
                     })
 
                 if fmt in ["epub", "both"]:
-                    epub_path = EpubBuilder.build(novel_info, ordered_chapters, cover_bytes, DOWNLOAD_DIR)
+                    epub_path = EpubBuilder.build(novel_info, ordered_chapters, cover_bytes, output_dir=story_dir)
                     generated_files.append({
                         "name": epub_path.name,
+                        "story": story_dir.name,
                         "format": "epub",
                         "size": epub_path.stat().st_size,
-                        "url": f"/api/files/{epub_path.name}"
+                        "url": f"/api/files/{quote(story_dir.name)}/{quote(epub_path.name)}"
                     })
 
                 task.files = generated_files

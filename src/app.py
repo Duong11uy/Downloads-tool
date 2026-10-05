@@ -28,6 +28,9 @@ from src.core.config import (
 )
 from src.core.task_manager import TaskManager
 from src.scraper.base import BaseScraperSession
+from src.scraper.site_parser import normalize_novel_url
+from src.builders.txt_builder import TxtBuilder
+from src.builders.epub_builder import EpubBuilder
 
 # Logging configuration
 logging.basicConfig(
@@ -231,39 +234,157 @@ if FASTAPI_AVAILABLE:
                 raise HTTPException(status_code=500, detail=str(e))
         raise HTTPException(status_code=404, detail="Thư mục không tồn tại")
 
+    @app.get("/api/export_txt/{folder_name}")
+    async def export_folder_as_txt(folder_name: str):
+        safe_name = unquote(folder_name).strip()
+        folder_path = DOWNLOAD_DIR / safe_name
+        if not folder_path.exists() or not folder_path.is_dir():
+            raise HTTPException(status_code=404, detail="Thư mục truyện không tồn tại")
+        
+        # Look for chapter txt files
+        txt_files = [tf for tf in folder_path.glob("*.txt") if tf.is_file() and re.match(r"^(?:chương|chuong)\s*\d+", tf.stem, re.IGNORECASE)]
+        if not txt_files:
+            txt_files = [tf for tf in folder_path.glob("*.txt") if tf.is_file()]
+        if not txt_files:
+            raise HTTPException(status_code=400, detail="Không có chương txt nào trong thư mục")
+        
+        def extract_idx(p: Path):
+            m = re.search(r"(?:chương|chuong)\s*(\d+)", p.stem, re.IGNORECASE)
+            return int(m.group(1)) if m else 999999
+        
+        sorted_files = sorted(txt_files, key=extract_idx)
+        # Always save merged file directly into the story's own folder
+        merged_file = folder_path / f"{safe_name}.txt"
+        
+        latest_mtime = max(f.stat().st_mtime for f in sorted_files)
+        if not merged_file.exists() or merged_file.stat().st_mtime < latest_mtime:
+            with open(merged_file, "w", encoding="utf-8") as out:
+                for i, tf in enumerate(sorted_files):
+                    content = tf.read_text(encoding="utf-8", errors="replace").strip()
+                    if content:
+                        if i > 0:
+                            out.write("\n\n\n")
+                        out.write(content + "\n")
+        
+        ascii_name = re.sub(r'[^\x20-\x7E]', '_', merged_file.name)
+        encoded_name = quote(merged_file.name)
+        headers = {
+            "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
+        }
+        return FileResponse(path=merged_file, media_type="text/plain; charset=utf-8", headers=headers)
+
+    @app.get("/api/export_epub/{folder_name}")
+    async def export_folder_as_epub(folder_name: str):
+        safe_name = unquote(folder_name).strip()
+        folder_path = DOWNLOAD_DIR / safe_name
+        if not folder_path.exists() or not folder_path.is_dir():
+            raise HTTPException(status_code=404, detail="Thư mục truyện không tồn tại")
+        
+        txt_files = [tf for tf in folder_path.glob("*.txt") if tf.is_file() and re.match(r"^(?:chương|chuong)\s*\d+", tf.stem, re.IGNORECASE)]
+        if not txt_files:
+            raise HTTPException(status_code=400, detail="Không có chương txt nào trong thư mục để tạo EPUB")
+        
+        def extract_idx(p: Path):
+            m = re.search(r"(?:chương|chuong)\s*(\d+)", p.stem, re.IGNORECASE)
+            return int(m.group(1)) if m else 999999
+        
+        sorted_files = sorted(txt_files, key=extract_idx)
+        epub_file = folder_path / f"{safe_name}.epub"
+        latest_mtime = max(f.stat().st_mtime for f in sorted_files)
+        
+        if not epub_file.exists() or epub_file.stat().st_mtime < latest_mtime:
+            chapters = []
+            for tf in sorted_files:
+                idx = extract_idx(tf)
+                ch = TxtBuilder.read_chapter_from_file(tf, idx)
+                if ch:
+                    chapters.append(ch)
+            novel_info = {"title": safe_name, "author": "Không rõ"}
+            EpubBuilder.build(novel_info, chapters, cover_bytes=None, output_dir=folder_path)
+            
+        ascii_name = re.sub(r'[^\x20-\x7E]', '_', epub_file.name)
+        encoded_name = quote(epub_file.name)
+        headers = {
+            "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
+        }
+        return FileResponse(path=epub_file, media_type="application/epub+zip", headers=headers)
+
+    @app.get("/api/export_zip/{folder_name}")
+    async def export_folder_as_zip(folder_name: str):
+        safe_name = unquote(folder_name).strip()
+        folder_path = DOWNLOAD_DIR / safe_name
+        if not folder_path.exists() or not folder_path.is_dir():
+            raise HTTPException(status_code=404, detail="Thư mục không tồn tại")
+        
+        zip_file = folder_path / f"{safe_name} (chương lẻ).zip"
+        import zipfile
+        txt_files = [tf for tf in folder_path.glob("*.txt") if tf.is_file() and re.match(r"^(?:chương|chuong)\s*\d+", tf.stem, re.IGNORECASE)]
+        if not txt_files:
+            txt_files = [tf for tf in folder_path.glob("*.txt") if tf.is_file()]
+            
+        with zipfile.ZipFile(zip_file, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for tf in txt_files:
+                zf.write(tf, arcname=tf.name)
+        
+        ascii_name = re.sub(r'[^\x20-\x7E]', '_', zip_file.name)
+        encoded_name = quote(zip_file.name)
+        headers = {
+            "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
+        }
+        return FileResponse(path=zip_file, media_type="application/zip", headers=headers)
+
     @app.get("/api/files")
     async def list_files():
         results = []
         if DOWNLOAD_DIR.exists():
-            for file in sorted(DOWNLOAD_DIR.iterdir(), key=os.path.getmtime, reverse=True):
-                if file.is_file() and file.suffix.lower() in [".epub", ".txt", ".zip"]:
-                    stat = file.stat()
+            for entry in sorted(DOWNLOAD_DIR.iterdir(), key=os.path.getmtime, reverse=True):
+                if entry.is_dir() and not entry.name.startswith("."):
+                    story_name = entry.name
+                    epubs = [f for f in entry.glob("*.epub") if f.is_file()]
+                    chapter_files = [f for f in entry.glob("*.txt") if f.is_file() and re.match(r"^(?:chương|chuong)\s*\d+", f.stem, re.IGNORECASE)]
+                    merged_txts = [f for f in entry.glob("*.txt") if f.is_file() and not re.match(r"^(?:chương|chuong)\s*\d+", f.stem, re.IGNORECASE)]
+                    
+                    total_size = sum(f.stat().st_size for f in entry.iterdir() if f.is_file())
+                    latest_mtime = entry.stat().st_mtime
+                    
                     results.append({
-                        "name": file.name,
-                        "format": file.suffix.lstrip(".").lower(),
+                        "name": story_name,
+                        "format": "story",
+                        "size": total_size,
+                        "mtime": latest_mtime,
+                        "chapter_count": len(chapter_files),
+                        "has_epub": len(epubs) > 0,
+                        "epub_name": epubs[0].name if epubs else None,
+                        "epub_size": epubs[0].stat().st_size if epubs else None,
+                        "epub_url": f"/api/files/{quote(story_name)}/{quote(epubs[0].name)}" if epubs else f"/api/export_epub/{quote(story_name)}",
+                        "has_txt": len(merged_txts) > 0,
+                        "txt_name": merged_txts[0].name if merged_txts else None,
+                        "txt_size": merged_txts[0].stat().st_size if merged_txts else None,
+                        "txt_url": f"/api/files/{quote(story_name)}/{quote(merged_txts[0].name)}" if merged_txts else f"/api/export_txt/{quote(story_name)}",
+                        "has_chapters": len(chapter_files) > 0,
+                        "zip_url": f"/api/export_zip/{quote(story_name)}"
+                    })
+                elif entry.is_file() and entry.suffix.lower() in [".epub", ".txt", ".zip"]:
+                    stat = entry.stat()
+                    results.append({
+                        "name": entry.name,
+                        "format": entry.suffix.lstrip(".").lower(),
                         "size": stat.st_size,
                         "mtime": stat.st_mtime,
-                        "url": f"/api/files/{file.name}"
+                        "url": f"/api/files/{quote(entry.name)}"
                     })
-                elif file.is_dir() and not file.name.startswith("."):
-                    txt_files = [tf for tf in file.glob("*.txt") if tf.is_file()]
-                    if txt_files:
-                        total_size = sum(tf.stat().st_size for tf in txt_files)
-                        results.append({
-                            "name": file.name,
-                            "format": "folder",
-                            "size": total_size,
-                            "count": len(txt_files),
-                            "mtime": file.stat().st_mtime,
-                            "url": f"/api/open_folder?name={quote(file.name)}"
-                        })
         return {"files": results}
 
-    @app.get("/api/files/{filename}")
-    async def download_file(filename: str):
-        file_path = DOWNLOAD_DIR / filename
-        if not file_path.exists() or not file_path.is_file():
+    @app.get("/api/files/{file_path:path}")
+    async def download_file(file_path: str):
+        decoded = unquote(file_path).strip()
+        target = (DOWNLOAD_DIR / decoded).resolve()
+        if not str(target).startswith(str(DOWNLOAD_DIR.resolve())):
+            raise HTTPException(status_code=403, detail="Truy cập không hợp lệ")
+        if not target.exists() or not target.is_file():
             raise HTTPException(status_code=404, detail="File không tồn tại")
+            
+        filename = target.name
         if filename.endswith(".epub"):
             media_type = "application/epub+zip"
         elif filename.endswith(".zip"):
@@ -275,18 +396,21 @@ if FASTAPI_AVAILABLE:
         headers = {
             "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}'
         }
-        return FileResponse(path=file_path, media_type=media_type, headers=headers)
+        return FileResponse(path=target, media_type=media_type, headers=headers)
 
-    @app.delete("/api/files/{filename}")
-    async def delete_file(filename: str):
-        file_path = DOWNLOAD_DIR / filename
-        if file_path.exists():
+    @app.delete("/api/files/{file_path:path}")
+    async def delete_file(file_path: str):
+        decoded = unquote(file_path).strip()
+        target = (DOWNLOAD_DIR / decoded).resolve()
+        if not str(target).startswith(str(DOWNLOAD_DIR.resolve())):
+            raise HTTPException(status_code=403, detail="Truy cập không hợp lệ")
+        if target.exists():
             try:
-                if file_path.is_dir():
-                    shutil.rmtree(file_path)
+                if target.is_dir():
+                    shutil.rmtree(target)
                 else:
-                    file_path.unlink()
-                return {"success": True, "message": f"Đã xóa {filename}"}
+                    target.unlink()
+                return {"success": True, "message": f"Đã xóa {decoded}"}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Không thể xóa: {e}")
         raise HTTPException(status_code=404, detail="Không tìm thấy file hoặc thư mục")

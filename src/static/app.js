@@ -419,39 +419,48 @@ document.addEventListener('DOMContentLoaded', () => {
             const isFolder = f.format === 'folder';
             const isEpub = f.format === 'epub';
             const isZip = f.format === 'zip';
+            const isTxt = f.format === 'txt';
             const sizeStr = formatFileSize(f.size);
 
-            if (isFolder) {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'px-5 py-3 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 text-white font-medium text-sm flex items-center gap-2 shadow-sm hover:opacity-95 active:scale-95 transition cursor-pointer';
-                const countStr = f.count ? ` (${f.count} chương)` : '';
-                btn.innerHTML = `<i class="fa-solid fa-folder-open"></i> Mở Thư Mục Truyện${countStr}`;
-                btn.onclick = async () => {
-                    try {
-                        const r = await fetch(`/api/open_folder?name=${encodeURIComponent(f.name)}`);
-                        const res = await r.json();
-                        if (!res.success) alert(res.detail || 'Không thể mở thư mục');
-                    } catch (e) {
-                        alert('Không thể mở thư mục: ' + e.message);
-                    }
-                };
-                downloadButtonsList.appendChild(btn);
-            } else {
-                const btn = document.createElement('a');
-                btn.href = `/api/files/${encodeURIComponent(f.name)}`;
-                btn.download = f.name;
-                const icon = isEpub ? 'fa-book' : (isZip ? 'fa-file-zipper' : 'fa-file-lines');
-                const colorClass = isEpub 
-                    ? 'from-purple-600 to-indigo-600' 
-                    : (isZip ? 'from-amber-600 to-orange-600' : 'from-emerald-600 to-teal-600');
-                const labelText = isZip ? 'Tải ZIP Từng Chương' : `Tải ${f.format.toUpperCase()}`;
+            const btn = document.createElement('a');
+            btn.href = f.url || `/api/files/${encodeURIComponent(f.name)}`;
+            btn.download = f.name;
 
-                btn.className = `px-5 py-3 rounded-xl bg-gradient-to-r ${colorClass} text-white font-medium text-sm flex items-center gap-2 shadow-sm hover:opacity-95 active:scale-95 transition`;
-                btn.innerHTML = `<i class="fa-solid ${icon}"></i> ${labelText} (${sizeStr})`;
-                downloadButtonsList.appendChild(btn);
+            let icon = 'fa-file-lines';
+            let colorClass = 'from-emerald-600 to-teal-600';
+            let labelText = `Tải ${f.name}`;
+
+            if (isEpub) {
+                icon = 'fa-book';
+                colorClass = 'from-purple-600 to-indigo-600';
+                labelText = `Tải EPUB (Kindle)`;
+            } else if (isTxt) {
+                icon = 'fa-file-lines';
+                colorClass = 'from-emerald-600 to-teal-600';
+                labelText = `Tải TXT Gộp`;
+            } else if (isFolder || isZip) {
+                icon = 'fa-file-zipper';
+                colorClass = 'from-amber-600 to-orange-600';
+                labelText = `Tải ZIP Từng Chương`;
             }
+
+            btn.className = `px-5 py-3 rounded-xl bg-gradient-to-r ${colorClass} text-white font-medium text-sm flex items-center gap-2 shadow-sm hover:opacity-95 active:scale-95 transition`;
+            btn.innerHTML = `<i class="fa-solid ${icon}"></i> ${labelText} (${sizeStr})`;
+            downloadButtonsList.appendChild(btn);
         });
+
+        // Auto trigger download for completed file
+        setTimeout(() => {
+            const downloadable = files.find(f => f.format === 'epub' || f.format === 'txt');
+            if (downloadable && downloadable.url) {
+                const autoA = document.createElement('a');
+                autoA.href = downloadable.url;
+                autoA.download = downloadable.name;
+                document.body.appendChild(autoA);
+                autoA.click();
+                document.body.removeChild(autoA);
+            }
+        }, 600);
     }
 
     // Format file size
@@ -478,40 +487,62 @@ document.addEventListener('DOMContentLoaded', () => {
             filesList.innerHTML = '';
             files.forEach(f => {
                 const item = document.createElement('div');
-                item.className = 'py-3 flex items-center justify-between gap-3';
-                const isFolder = f.format === 'folder';
-                const isEpub = f.format === 'epub';
-                const isZip = f.format === 'zip';
-                const icon = isFolder
-                    ? 'fa-folder text-amber-500'
-                    : (isEpub ? 'fa-book text-purple-500' : (isZip ? 'fa-file-zipper text-amber-500' : 'fa-file-lines text-emerald-500'));
-                const subText = isFolder 
-                    ? `${f.count || 0} file chương • ${formatFileSize(f.size)}`
-                    : formatFileSize(f.size);
+                item.className = 'py-3.5 px-4 rounded-xl border border-gray-100 dark:border-gray-700/60 bg-gray-50/50 dark:bg-gray-800/50 flex flex-col md:flex-row md:items-center justify-between gap-3';
 
-                const actionBtn = isFolder
-                    ? `<button data-foldername="${f.name}" class="open-folder-btn p-2 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg transition" title="Mở thư mục trên máy">
-                         <i class="fa-solid fa-folder-open text-base"></i>
-                       </button>`
-                    : `<a href="/api/files/${encodeURIComponent(f.name)}" download="${f.name}" class="p-2 text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-lg transition" title="Tải về">
-                         <i class="fa-solid fa-download"></i>
-                       </a>`;
+                if (f.format === 'story') {
+                    const chapterStr = f.chapter_count ? `${f.chapter_count} chương lẻ` : '';
+                    const sizeStr = formatFileSize(f.size);
+                    const badges = [];
+                    if (f.has_epub) badges.push(`<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">EPUB (${formatFileSize(f.epub_size)})</span>`);
+                    if (f.has_txt) badges.push(`<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">TXT Gộp (${formatFileSize(f.txt_size)})</span>`);
+                    if (chapterStr) badges.push(`<span class="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">${chapterStr}</span>`);
 
-                item.innerHTML = `
-                    <div class="flex items-center gap-3 overflow-hidden">
-                        <i class="fa-solid ${icon} text-lg flex-shrink-0"></i>
-                        <div class="truncate">
-                            <p class="font-medium text-gray-900 dark:text-white truncate text-sm">${f.name}</p>
-                            <p class="text-xs text-gray-400">${subText}</p>
+                    const btnEpub = `<a href="${f.epub_url}" download class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition" title="Tải EPUB gộp"><i class="fa-solid fa-book"></i> EPUB</a>`;
+                    const btnTxt = `<a href="${f.txt_url}" download class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition" title="Tải TXT 1 file gộp"><i class="fa-solid fa-file-lines"></i> TXT Gộp</a>`;
+                    const btnZip = f.has_chapters ? `<a href="${f.zip_url}" download class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition" title="Tải ZIP các chương lẻ"><i class="fa-solid fa-file-zipper"></i> ZIP lẻ</a>` : '';
+
+                    item.innerHTML = `
+                        <div class="flex items-start gap-3 overflow-hidden">
+                            <div class="p-2.5 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0">
+                                <i class="fa-solid fa-folder-tree text-lg"></i>
+                            </div>
+                            <div class="truncate">
+                                <p class="font-semibold text-gray-900 dark:text-white truncate text-sm">${f.name}</p>
+                                <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                                    ${badges.join('')}
+                                    <span class="text-xs text-gray-400 ml-1">• Tổng: ${sizeStr}</span>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                    <div class="flex items-center gap-2 flex-shrink-0">
-                        ${actionBtn}
-                        <button data-filename="${f.name}" class="delete-file-btn p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition" title="Xóa">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
-                    </div>
-                `;
+                        <div class="flex items-center gap-2 flex-wrap flex-shrink-0 self-end md:self-auto">
+                            ${btnEpub}
+                            ${btnTxt}
+                            ${btnZip}
+                            <button data-filename="${f.name}" class="delete-file-btn p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition" title="Xóa toàn bộ truyện này">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    const icon = f.format === 'epub' ? 'fa-book text-purple-500' : 'fa-file-lines text-emerald-500';
+                    item.innerHTML = `
+                        <div class="flex items-center gap-3 overflow-hidden">
+                            <i class="fa-solid ${icon} text-lg flex-shrink-0"></i>
+                            <div class="truncate">
+                                <p class="font-medium text-gray-900 dark:text-white truncate text-sm">${f.name}</p>
+                                <p class="text-xs text-gray-400">${formatFileSize(f.size)}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            <a href="${f.url}" download="${f.name}" class="p-2 text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/30 rounded-lg transition" title="Tải về">
+                                <i class="fa-solid fa-download"></i>
+                            </a>
+                            <button data-filename="${f.name}" class="delete-file-btn p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition" title="Xóa">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    `;
+                }
                 filesList.appendChild(item);
             });
 

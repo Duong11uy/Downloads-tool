@@ -66,14 +66,28 @@ class BaseScraperSession:
         self._httpx_client = None
         self._requests_session = None
 
+        # Auto-detect Cloudflare WARP proxy (127.0.0.1:40000) or Tor (127.0.0.1:9050)
+        self.proxy = None
+        for port in [40000, 9050]:
+            try:
+                import socket
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    self.proxy = f"socks5://127.0.0.1:{port}"
+                    break
+            except Exception:
+                pass
+
     async def __aenter__(self):
         if self.use_curl:
             try:
-                self._curl_session = CurlSession(
-                    impersonate="chrome120",
-                    headers=self.default_headers,
-                    timeout=REQUEST_TIMEOUT
-                )
+                kwargs = {
+                    "impersonate": "chrome120",
+                    "headers": self.default_headers,
+                    "timeout": REQUEST_TIMEOUT
+                }
+                if self.proxy:
+                    kwargs["proxy"] = self.proxy
+                self._curl_session = CurlSession(**kwargs)
             except Exception as e:
                 logger.warning(f"Failed to initialize curl_cffi session: {e}. Falling back.")
                 self.use_curl = False
@@ -81,11 +95,14 @@ class BaseScraperSession:
         if httpx:
             try:
                 # Do NOT pass http2=True to avoid missing 'h2' and SSL EOF issues
-                self._httpx_client = httpx.AsyncClient(
-                    headers=self.default_headers,
-                    timeout=REQUEST_TIMEOUT,
-                    follow_redirects=True
-                )
+                kwargs = {
+                    "headers": self.default_headers,
+                    "timeout": REQUEST_TIMEOUT,
+                    "follow_redirects": True
+                }
+                if self.proxy:
+                    kwargs["proxy"] = self.proxy
+                self._httpx_client = httpx.AsyncClient(**kwargs)
             except Exception as e:
                 logger.warning(f"Failed to initialize httpx client: {e}")
                 self._httpx_client = None
@@ -94,6 +111,8 @@ class BaseScraperSession:
             try:
                 self._requests_session = requests.Session()
                 self._requests_session.headers.update(self.default_headers)
+                if self.proxy:
+                    self._requests_session.proxies = {"http": self.proxy, "https": self.proxy}
             except Exception as e:
                 logger.warning(f"Failed to initialize requests session: {e}")
                 self._requests_session = None
