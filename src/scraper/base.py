@@ -176,37 +176,58 @@ class BaseScraperSession:
         req_headers = {**self.default_headers, **(headers or {})}
         while attempt < retries:
             attempt += 1
+            is_rate_limited = False
+            last_err = None
+
             if self.use_curl and self._curl_session:
                 try:
                     resp = await self._curl_session.post(url, data=data, headers=req_headers)
                     if resp.status_code == 200:
                         return resp.text
+                    if resp.status_code in [429, 403, 503]:
+                        is_rate_limited = True
+                    last_err = f"status {resp.status_code}"
                 except Exception as ce:
-                    logger.warning(f"curl_cffi POST error ({attempt}/{retries}): {ce}")
+                    last_err = str(ce)
+                    if "429" in last_err or "rate" in last_err.lower():
+                        is_rate_limited = True
 
             if self._httpx_client:
                 try:
                     resp = await self._httpx_client.post(url, data=data, headers=req_headers)
                     if resp.status_code == 200:
                         return resp.text
+                    if resp.status_code in [429, 403, 503]:
+                        is_rate_limited = True
+                    last_err = f"status {resp.status_code}"
                 except Exception as he:
-                    logger.warning(f"httpx POST error ({attempt}/{retries}): {he}")
+                    last_err = str(he)
+                    if "429" in last_err or "rate" in last_err.lower():
+                        is_rate_limited = True
 
             if requests:
                 try:
                     return await asyncio.to_thread(self._sync_requests_post, url, data, req_headers)
                 except Exception as re_err:
+                    last_err = str(re_err)
+                    if "429" in last_err or "too many requests" in last_err.lower():
+                        is_rate_limited = True
                     logger.warning(f"requests POST error ({attempt}/{retries}): {re_err}")
 
             try:
                 raw_bytes = await asyncio.to_thread(self._sync_urllib_post, url, data, req_headers)
                 return raw_bytes.decode("utf-8", errors="replace")
             except Exception as ue:
+                last_err = str(ue)
+                if "429" in last_err or "too many requests" in last_err.lower():
+                    is_rate_limited = True
                 logger.warning(f"urllib POST error ({attempt}/{retries}): {ue}")
 
             if attempt >= retries:
-                raise Exception(f"POST {url} thất bại sau {retries} lần thử.")
-            await asyncio.sleep(0.5)
+                raise Exception(f"POST {url} thất bại sau {retries} lần thử ({last_err}).")
+            
+            backoff = (2.0 * attempt) if is_rate_limited else 0.5
+            await asyncio.sleep(backoff)
         raise Exception(f"POST {url} thất bại")
 
     async def get_html(self, url: str, headers: Optional[Dict[str, str]] = None, retries: int = MAX_RETRIES) -> str:
@@ -278,7 +299,7 @@ class BaseScraperSession:
 
     async def get_binary(self, url: str, retries: int = 2) -> Optional[bytes]:
         """
-        Download binary data like cover images.
+        Download binary data like cover images. Fast-fails immediately on 404.
         """
         attempt = 0
         while attempt < retries:
@@ -288,26 +309,39 @@ class BaseScraperSession:
                     resp = await self._curl_session.get(url)
                     if resp.status_code == 200:
                         return resp.content
-                except Exception:
-                    pass
+                    if resp.status_code == 404:
+                        return None
+                except Exception as ce:
+                    if "404" in str(ce):
+                        return None
 
             if self._httpx_client:
                 try:
                     resp = await self._httpx_client.get(url)
                     if resp.status_code == 200:
                         return resp.content
-                except Exception:
-                    pass
+                    if resp.status_code == 404:
+                        return None
+                except Exception as he:
+                    if "404" in str(he):
+                        return None
 
             if requests:
                 try:
                     return await asyncio.to_thread(self._sync_requests_get_bytes, url, self.default_headers)
-                except Exception:
-                    pass
+                except Exception as re_err:
+                    if "404" in str(re_err):
+                        return None
 
             try:
                 return await asyncio.to_thread(self._sync_urllib_get, url, self.default_headers)
+            except urllib.error.HTTPError as ue:
+                if ue.code == 404:
+                    return None
+                logger.warning(f"Error fetching binary {url} (Attempt {attempt}): {ue}")
             except Exception as e:
+                if "404" in str(e):
+                    return None
                 logger.warning(f"Error fetching binary {url} (Attempt {attempt}): {e}")
 
             await asyncio.sleep(0.5)

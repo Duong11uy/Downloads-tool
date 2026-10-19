@@ -330,7 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
             activeEventSource = null;
         }
 
-        let pollInterval = null;
+        let consecutive404Count = 0;
 
         function updateUI(data) {
             if (!data) return;
@@ -347,14 +347,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 progressStatusLabel.textContent = 'Đang tải nội dung các chương...';
                 currentChapterLabel.textContent = `Chương đang tải: ${data.current_chapter || ''}`;
                 downloadCounter.textContent = `${data.downloaded_count} / ${data.total_to_download}`;
+            } else if (data.status === 'repairing') {
+                progressStatusLabel.textContent = 'Đang tự động tải bù chương bị gián đoạn...';
+                currentChapterLabel.textContent = data.current_chapter || 'Đang nạp lại dữ liệu...';
+                downloadCounter.textContent = `${data.downloaded_count} / ${data.total_to_download}`;
             } else if (data.status === 'building') {
                 progressStatusLabel.textContent = 'Đang đóng gói file sách...';
                 currentChapterLabel.textContent = data.current_chapter || 'Đang tạo EPUB/TXT...';
+                downloadCounter.textContent = `${data.total_to_download} / ${data.total_to_download}`;
             } else if (data.status === 'completed') {
                 progressBarFill.style.width = '100%';
                 progressPercent.textContent = '100%';
-                progressStatusLabel.textContent = 'Hoàn tất tải về!';
-                currentChapterLabel.textContent = 'Sách đã được đóng gói thành công.';
+                progressStatusLabel.textContent = 'Hoàn tất tải về và đóng gói thành công!';
+                currentChapterLabel.textContent = data.current_chapter || 'Sách đã được đóng gói thành công.';
+                downloadCounter.textContent = `${data.total_to_download} / ${data.total_to_download}`;
                 
                 showCompletedFiles(data.files || []);
                 stopListening();
@@ -402,8 +408,16 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const resp = await fetch(`/api/progress_poll/${taskId}`);
                 if (resp.ok) {
+                    consecutive404Count = 0;
                     const data = await resp.json();
                     updateUI(data);
+                } else if (resp.status === 404) {
+                    consecutive404Count++;
+                    if (consecutive404Count >= 4) {
+                        stopListening();
+                        startDownloadBtn.disabled = false;
+                        loadRecentFiles();
+                    }
                 }
             } catch (e) {
                 // Ignore poll network errors

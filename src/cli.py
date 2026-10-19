@@ -1,6 +1,24 @@
 import argparse
 import asyncio
+import os
 import sys
+from pathlib import Path
+
+# Ensure UTF-8 output on Windows consoles
+if sys.stdout:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if sys.stderr:
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+# Ensure project root is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from src.scraper.base import BaseScraperSession
 from src.scraper.site_parser import SiteParserManager
 from src.builders.txt_builder import TxtBuilder

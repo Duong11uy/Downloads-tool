@@ -51,6 +51,9 @@ class TxtBuilder:
                 return None
             title = non_empty[0]
             paragraphs = non_empty[1:]
+            # Ignore files that only contain error messages
+            if not paragraphs or all(p.startswith("[Lỗi") for p in paragraphs):
+                return None
             return {
                 "index": chapter_index,
                 "title": title,
@@ -65,10 +68,15 @@ class TxtBuilder:
         story_dir: Path,
         chapter: Dict[str, Any],
         overwrite: bool = False
-    ) -> Path:
+    ) -> Optional[Path]:
         """
         Saves a single chapter to story_dir. If file exists and not overwrite, leaves it untouched.
+        Does not save if the chapter only contains error placeholders.
         """
+        paragraphs = chapter.get("paragraphs", [])
+        if not paragraphs or all(p.startswith("[Lỗi") for p in paragraphs):
+            return None
+
         idx = chapter.get("index", 1)
         existing = TxtBuilder.find_existing_chapter_file(story_dir, idx)
         if existing and not overwrite:

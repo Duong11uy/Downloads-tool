@@ -210,7 +210,7 @@ class TaskManager:
 
                 if completed_chapters_dict:
                     logger.info(f"Đã phát hiện và nạp sẵn {len(completed_chapters_dict)}/{task.total_to_download} chương từ thư mục '{story_dir.name}' (không cần cào lại).")
-                    task.progress = (task.downloaded_count / task.total_to_download) * 90.0
+                    task.progress = round((task.downloaded_count / task.total_to_download) * 85.0, 1)
                     task.current_chapter = f"Đã có sẵn {len(completed_chapters_dict)}/{task.total_to_download} chương trong thư mục"
                     task.emit_event()
 
@@ -250,7 +250,7 @@ class TaskManager:
                         completed_chapters_dict[idx] = parsed_ch
                         
                         task.downloaded_count += 1
-                        task.progress = (task.downloaded_count / task.total_to_download) * 90.0  # 0 to 90%
+                        task.progress = round((task.downloaded_count / task.total_to_download) * 85.0, 1)  # 0 to 85%
                         task.current_chapter = parsed_ch.get("title", f"Chương {idx}")
                         task.emit_event()
 
@@ -267,43 +267,67 @@ class TaskManager:
                     paras = ch.get("paragraphs", [])
                     return not paras or (len(paras) == 1 and paras[0].startswith("[Lỗi khi tải nội dung chương"))
 
-                for repair_round in range(1, 3):
-                    failed_items = [
-                        ch for ch in target_chapters
-                        if is_failed_chapter(completed_chapters_dict.get(ch.get("index", 0), {}))
-                    ]
-                    if not failed_items or task._cancel_requested:
-                        break
+                initial_failed_count = sum(
+                    1 for ch in target_chapters
+                    if is_failed_chapter(completed_chapters_dict.get(ch.get("index", 0), {}))
+                )
 
-                    logger.info(f"Phát hiện {len(failed_items)} chương bị gián đoạn mạng. Bắt đầu tải bù vòng {repair_round}...")
-                    task.current_chapter = f"Đang tải bù {len(failed_items)} chương bị gián đoạn mạng..."
+                if initial_failed_count > 0:
+                    task.status = "repairing"
+                    task.current_chapter = f"Phát hiện {initial_failed_count} chương bị gián đoạn mạng. Đang tự động tải bù..."
+                    task.progress = 86.0
                     task.emit_event()
 
-                    # Pause to allow Cloudflare/server rate limiting window to clear
-                    await asyncio.sleep(2.5)
+                    repaired_attempts = 0
+                    max_attempts = min(initial_failed_count, 100) * 2
+                    repair_sem = asyncio.Semaphore(min(3, effective_c))
 
-                    for f_item in failed_items:
+                    async def repair_single_chapter(f_item, round_num):
+                        nonlocal repaired_attempts
                         if task._cancel_requested:
+                            return
+                        async with repair_sem:
+                            await asyncio.sleep(random.uniform(0.2, 0.5))
+                            f_idx = f_item.get("index", 1)
+                            f_url = f_item.get("url", "")
+                            f_hint = f_item.get("title", "")
+                            try:
+                                re_parsed = await self.parser_manager.parse_chapter(
+                                    session=session,
+                                    chapter_url=f_url,
+                                    chapter_index=f_idx,
+                                    chapter_title_hint=f_hint,
+                                    cookie=task.cookie,
+                                    user_agent=task.user_agent
+                                )
+                                if not is_failed_chapter(re_parsed):
+                                    completed_chapters_dict[f_idx] = re_parsed
+                                    TxtBuilder.save_chapter_to_story_dir(story_dir, re_parsed, overwrite=True)
+                                    logger.info(f"Đã tải bù thành công chương {f_idx}: {f_hint}")
+                            except Exception as re_err:
+                                logger.warning(f"Tải bù thất bại chương {f_idx} (vòng {round_num}): {re_err}")
+
+                            repaired_attempts += 1
+                            repair_ratio = min(1.0, repaired_attempts / max(1, max_attempts))
+                            task.progress = round(86.0 + (repair_ratio * 5.0), 1)  # 86% to 91%
+                            task.current_chapter = f"Đang tải bù chương {f_idx}: {f_hint or f'Chương {f_idx}'}"
+                            task.emit_event()
+
+                    for repair_round in range(1, 3):
+                        failed_items = [
+                            ch for ch in target_chapters
+                            if is_failed_chapter(completed_chapters_dict.get(ch.get("index", 0), {}))
+                        ]
+                        if not failed_items or task._cancel_requested:
                             break
-                        f_idx = f_item.get("index", 1)
-                        f_url = f_item.get("url", "")
-                        f_hint = f_item.get("title", "")
-                        try:
-                            re_parsed = await self.parser_manager.parse_chapter(
-                                session=session,
-                                chapter_url=f_url,
-                                chapter_index=f_idx,
-                                chapter_title_hint=f_hint,
-                                cookie=task.cookie,
-                                user_agent=task.user_agent
-                            )
-                            if not is_failed_chapter(re_parsed):
-                                completed_chapters_dict[f_idx] = re_parsed
-                                TxtBuilder.save_chapter_to_story_dir(story_dir, re_parsed, overwrite=True)
-                                logger.info(f"Đã tải bù thành công chương {f_idx}: {f_hint}")
-                        except Exception as re_err:
-                            logger.warning(f"Tải bù thất bại chương {f_idx} (vòng {repair_round}): {re_err}")
-                        await asyncio.sleep(0.5)
+
+                        # Limit repair attempts to prevent unbounded loops if entire site is down
+                        repair_batch = failed_items[:100]
+                        logger.info(f"Đang tải bù {len(repair_batch)} chương vòng {repair_round}...")
+                        await asyncio.sleep(1.5)
+
+                        repair_jobs = [repair_single_chapter(item, repair_round) for item in repair_batch]
+                        await asyncio.gather(*repair_jobs, return_exceptions=True)
 
                 # Sort downloaded chapters by index
                 ordered_chapters = [
@@ -313,14 +337,17 @@ class TaskManager:
 
                 # 2. Building formats
                 task.status = "building"
-                task.current_chapter = "Đang đóng gói file sách..."
                 task.progress = 92.0
+                task.current_chapter = "Đang chuẩn bị đóng gói file sách..."
                 task.emit_event()
 
                 # Download cover image if available
                 cover_bytes = None
                 cover_url = novel_info.get("cover")
                 if cover_url:
+                    task.current_chapter = "Đang kiểm tra và tải ảnh bìa sách..."
+                    task.progress = 93.0
+                    task.emit_event()
                     try:
                         cover_bytes = await session.get_binary(cover_url)
                     except Exception as e:
@@ -331,7 +358,10 @@ class TaskManager:
                 fmt = task.format_type
 
                 if fmt in ["txt", "both"]:
-                    txt_path = TxtBuilder.build(novel_info, ordered_chapters, output_dir=story_dir)
+                    task.current_chapter = f"Đang tạo tệp TXT gộp ({len(ordered_chapters)} chương)..."
+                    task.progress = 95.0
+                    task.emit_event()
+                    txt_path = await asyncio.to_thread(TxtBuilder.build, novel_info, ordered_chapters, story_dir)
                     generated_files.append({
                         "name": txt_path.name,
                         "story": story_dir.name,
@@ -341,7 +371,10 @@ class TaskManager:
                     })
 
                 if fmt in ["txt_split", "split"]:
-                    story_dir = TxtBuilder.build_split(novel_info, ordered_chapters, DOWNLOAD_DIR)
+                    task.current_chapter = "Đang xuất danh mục chương lẻ..."
+                    task.progress = 96.0
+                    task.emit_event()
+                    story_dir = await asyncio.to_thread(TxtBuilder.build_split, novel_info, ordered_chapters, DOWNLOAD_DIR)
                     txt_files = [f for f in story_dir.glob("*.txt") if f.is_file() and re.match(r"^(?:chương|chuong)\s*\d+", f.stem, re.IGNORECASE)]
                     total_bytes = sum(f.stat().st_size for f in txt_files)
                     generated_files.append({
@@ -354,7 +387,10 @@ class TaskManager:
                     })
 
                 if fmt in ["epub", "both"]:
-                    epub_path = EpubBuilder.build(novel_info, ordered_chapters, cover_bytes, output_dir=story_dir)
+                    task.current_chapter = f"Đang đóng gói sách điện tử EPUB ({len(ordered_chapters)} chương)..."
+                    task.progress = 98.0
+                    task.emit_event()
+                    epub_path = await asyncio.to_thread(EpubBuilder.build, novel_info, ordered_chapters, cover_bytes, story_dir)
                     generated_files.append({
                         "name": epub_path.name,
                         "story": story_dir.name,
@@ -366,7 +402,7 @@ class TaskManager:
                 task.files = generated_files
                 task.status = "completed"
                 task.progress = 100.0
-                task.current_chapter = "Hoàn tất tải về!"
+                task.current_chapter = "Hoàn tất tải về và đóng gói thành công!"
                 task.emit_event()
 
         except Exception as e:

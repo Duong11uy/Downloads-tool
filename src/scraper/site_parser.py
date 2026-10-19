@@ -124,23 +124,46 @@ class SiteParserManager:
     def decompress_xtruyen_content(html: str) -> Optional[List[str]]:
         """
         Extracts and decompresses encrypted chapter content for xtruyen.vn.
+        Supports both modern readingChapterConfig.encodedData and legacy data_x formats.
         """
         import base64
         import zlib
-        m = re.search(r'const\s+data_x\s*=\s*["\']([^"\']+)["\']', html)
-        if not m:
-            return None
-        data_x = m.group(1).strip()
+
+        data_x = ""
+        m_new = re.search(r'encodedData\s*:\s*["\']([^"\']+)["\']', html)
+        if m_new:
+            data_x = m_new.group(1).strip()
+        else:
+            m_old = re.search(r'const\s+data_x\s*=\s*["\']([^"\']+)["\']', html)
+            if m_old:
+                data_x = m_old.group(1).strip()
+
         if not data_x:
             return None
 
+        # Table 1: Modern XTruyen substitution cipher mapping
+        enc_new = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"
+        atob_new = "pi3nIZ8GHw4flcTV7LmxO9NuBUqaCd+vjJt/rbFz0o2QkXeyKS6MPA51shWYRgED"
+
+        # Table 2 & 3: Legacy XTruyen cipher mappings
         c_chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_"
         s_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-        for trans_from, trans_to in [(c_chars, s_chars), (s_chars, c_chars)]:
+        candidate_transforms = [
+            (enc_new, atob_new),
+            (c_chars, s_chars),
+            (s_chars, c_chars),
+            (None, None)
+        ]
+
+        for trans_from, trans_to in candidate_transforms:
             try:
-                trans = str.maketrans(trans_from, trans_to)
-                b64_str = data_x.translate(trans)
+                if trans_from and trans_to:
+                    trans = str.maketrans(trans_from, trans_to)
+                    b64_str = data_x.translate(trans)
+                else:
+                    b64_str = data_x.replace("-", "+").replace("_", "/")
+
                 pad = len(b64_str) % 4
                 if pad:
                     b64_str += "=" * (4 - pad)
@@ -158,13 +181,22 @@ class SiteParserManager:
                         rm.decompose()
                     for br in soup.find_all("br"):
                         br.replace_with("\n")
-                    text = soup.get_text()
-                    lines = text.split("\n")
+
+                    p_tags = soup.find_all("p")
                     paragraphs = []
-                    for line in lines:
-                        cleaned = clean_text_paragraph(line)
-                        if cleaned:
-                            paragraphs.append(cleaned)
+                    if len(p_tags) > 3:
+                        for p in p_tags:
+                            for line in p.get_text().split("\n"):
+                                cleaned = clean_text_paragraph(line)
+                                if cleaned:
+                                    paragraphs.append(cleaned)
+                    else:
+                        lines = soup.get_text("\n").split("\n")
+                        for line in lines:
+                            cleaned = clean_text_paragraph(line)
+                            if cleaned:
+                                paragraphs.append(cleaned)
+
                     if paragraphs:
                         return paragraphs
             except Exception as ex:
@@ -342,7 +374,20 @@ class SiteParserManager:
                 user_agent=user_agent
             )
             if not p_chaps:
-                break
+                # Retry once after cooling down if expected total is not yet reached
+                if expected_total > 0 and len(all_chapters) < min(expected_total, target_end_chap):
+                    await asyncio.sleep(2.0)
+                    p_chaps = await self.fetch_xtruyen_chapters(
+                        session=session,
+                        novel_url=clean_base,
+                        manga_id=manga_id,
+                        from_idx=f_idx,
+                        to_idx=t_idx,
+                        cookie=cookie,
+                        user_agent=user_agent
+                    )
+                if not p_chaps:
+                    break
 
             for ch in p_chaps:
                 ch_idx = ch.get("index")
@@ -366,7 +411,7 @@ class SiteParserManager:
                 break
 
             curr_p += 1
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.4)
 
         return all_chapters, expected_total
 

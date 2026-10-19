@@ -16,6 +16,17 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+if sys.stdout:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if sys.stderr:
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from src.core.config import (
     APP_NAME,
     APP_VERSION,
@@ -24,6 +35,7 @@ from src.core.config import (
     DOWNLOAD_DIR,
     STATIC_DIR,
     DEFAULT_CONCURRENCY,
+    DEFAULT_USER_AGENT,
     SITES_CONFIG_PATH
 )
 from src.core.task_manager import TaskManager
@@ -38,6 +50,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("novel_downloader")
+
+def sanitize_user_agent(ua: Optional[str]) -> str:
+    ua = (ua or "").strip()
+    if not ua or any(bad in ua.lower() for bad in ["python", "urllib", "curl", "postman", "aiohttp"]):
+        return DEFAULT_USER_AGENT
+    return ua
 
 task_manager = TaskManager()
 
@@ -149,7 +167,7 @@ if FASTAPI_AVAILABLE:
         clean_url = normalize_novel_url(url)
         site_cfg = task_manager.parser_manager.find_site_config(clean_url)
         cookie = (req.cookie or "").strip()
-        user_agent = (req.user_agent or "").strip() or request.headers.get("user-agent", "")
+        user_agent = sanitize_user_agent((req.user_agent or "").strip() or request.headers.get("user-agent", ""))
         
         # Fallback to saved cookie if not explicitly provided
         if not cookie and site_cfg and "headers" in site_cfg:
@@ -653,14 +671,14 @@ class BuiltinHandler(SimpleHTTPRequestHandler):
         if path == "/api/analyze":
             url = payload.get("url", "").strip()
             cookie = payload.get("cookie", "").strip()
-            user_agent = payload.get("user_agent", "").strip() or self.headers.get("User-Agent", "")
+            user_agent = sanitize_user_agent(payload.get("user_agent", "").strip() or self.headers.get("User-Agent", ""))
             if not url:
                 self.send_error(400, "URL required")
                 return
 
             try:
                 async def _analyze():
-                    async with BaseScraperSession(cookie=cookie) as session:
+                    async with BaseScraperSession(cookie=cookie, user_agent=user_agent) as session:
                         return await task_manager.parser_manager.analyze_novel(
                             session, url, cookie=cookie, user_agent=user_agent
                         )
@@ -689,7 +707,7 @@ class BuiltinHandler(SimpleHTTPRequestHandler):
                 end_chap = int(payload.get("end_chapter", 99999))
                 fmt = payload.get("format", "epub")
                 cookie = payload.get("cookie", "").strip()
-                user_agent = payload.get("user_agent", "").strip() or self.headers.get("User-Agent", "")
+                user_agent = sanitize_user_agent(payload.get("user_agent", "").strip() or self.headers.get("User-Agent", ""))
                 task = task_manager.create_task(
                     url, start_chap, end_chap, fmt,
                     cookie=cookie, user_agent=user_agent
